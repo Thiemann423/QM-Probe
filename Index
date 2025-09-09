@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QM‑Proben – M365 (SharePoint + Graph)</title>
+  <style>
+    :root{--bg:#f6f7f8;--card:#fff;--ink:#111;--muted:#6b7280;--line:#e5e7eb;--accent:#111;--ok:#0ea5e9;--final:#10b981;--warn:#f59e0b;--bad:#ef4444}
+    *{box-sizing:border-box}
+    body{margin:0;font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--ink)}
+    .wrap{max-width:1180px;margin:auto;padding:20px}
+    .bar{display:flex;gap:8px;align-items:center;justify-content:space-between}
+    .btn{background:var(--accent);color:#fff;border:0;border-radius:12px;padding:10px 12px;font-size:13px;cursor:pointer}
+    .btn.sec{background:#e5e7eb;color:#111}
+    .btn.final{background:var(--final)}
+    .btn.bad{background:#fee2e2;color:#b91c1c}
+    .grid{display:grid;grid-template-columns:310px 1fr;gap:16px}
+    @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 2px 10px rgba(0,0,0,0.04)}
+    .pad{padding:12px}
+    .muted{color:var(--muted)}
+    .inp, select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid var(--line);border-radius:12px;padding:8px}
+    .list{max-height:60vh;overflow:auto}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    th,td{border-bottom:1px solid var(--line);padding:8px;vertical-align:top;font-size:13px}
+    thead th{position:sticky;top:0;background:#fafafa;text-align:left}
+    .tag{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}
+    .status-FINAL{border-color:var(--final);color:var(--final)}
+    .status-ENTWURF{border-color:var(--warn);color:var(--warn)}
+  </style>
+  <!-- MSAL.js (Microsoft Login) -->
+  <script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js" integrity="sha384-3nqzWb3mGzltu1b9uYY0Q+qGjkZfz6l1h8oivEw1o5zDknE9mup6T2v0vNMyU4kW" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <div>
+        <h2 style="margin:0">QM‑Proben – M365</h2>
+        <div class="muted">Zentrale Speicherung in **SharePoint** · Login via Microsoft</div>
+      </div>
+      <div class="bar" style="gap:6px">
+        <span id="account" class="muted"></span>
+        <button class="btn sec" id="loginBtn">Anmelden</button>
+        <button class="btn bad" id="logoutBtn" style="display:none">Abmelden</button>
+      </div>
+    </div>
+
+    <div class="bar" style="margin-top:10px">
+      <div class="bar" style="gap:8px">
+        <button class="btn" id="newListBtn">Neue Tagesliste</button>
+        <span class="muted">Modus:</span>
+        <button class="btn sec" id="modeQS">QS</button>
+        <button class="btn sec" id="modeChef">Chefin</button>
+      </div>
+      <input id="search" class="inp" placeholder="Suchen (Titel/Datum)" style="width:260px" />
+    </div>
+
+    <div class="grid" style="margin-top:12px">
+      <aside class="card pad">
+        <div class="muted" style="margin-bottom:8px">Tageslisten (SharePoint)</div>
+        <div id="lists" class="list"></div>
+      </aside>
+
+      <main class="card pad">
+        <div id="empty">Melde dich an und wähle links eine Tagesliste oder erstelle eine neue.</div>
+        <div id="detail" style="display:none">
+          <div class="bar">
+            <div style="flex:1">
+              <div class="muted">Titel</div>
+              <input id="title" class="inp" />
+            </div>
+            <div>
+              <div class="muted">Datum</div>
+              <input id="date" type="date" class="inp" />
+            </div>
+            <div class="bar">
+              <button class="btn sec" id="exportPdf">Als PDF</button>
+              <button class="btn final" id="toggleFinal">Finalisieren</button>
+            </div>
+          </div>
+
+          <div class="muted" style="margin:8px 0">Positionen</div>
+          <div style="margin-bottom:8px"><button class="btn" id="addItem">+ Position</button></div>
+          <div style="overflow:auto;max-height:60vh">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th><th>Produkt</th><th>Marke</th><th>Artikel‑Nr.</th><th>Menge</th><th>Anweisungen</th><th>Losnummer</th><th>MHD</th><th>Notizen</th><th>OK</th>
+                </tr>
+              </thead>
+              <tbody id="items"></tbody>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px">Status: <span id="statusTag" class="tag status-ENTWURF">ENTWURF</span></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    // === 🔧 KONFIGURATION – HIER EINTRAGEN ===
+    const CONFIG = {
+      tenantId: "<TENANT_ID>",            // z.B. 11111111-2222-3333-4444-555555555555
+      clientId: "<APP_CLIENT_ID>",        // App-Registrierung (SPA)
+      sharepoint: {
+        siteHostname: "<tenant>.sharepoint.com",   // z.B. petri.sharepoint.com
+        sitePath: "/sites/<SiteName>",             // z.B. /sites/QM
+        listName: "QM Tageslisten"                  // Liste muss existieren
+      }
+    };
+
+    // === 💡 DATENMODELL (einfach):
+    // In der SharePoint-Liste "QM Tageslisten" speichern wir je Tagesliste EINEN Eintrag.
+    // Wichtige Felder: Title (Text), Datum (DateOnly), Status (Choice/Text), Payload (Multiple lines plain text)
+    // "Payload" enthält die komplette Liste inkl. Positionen als JSON (leicht, robust, versionierbar).
+
+    // === 🔐 Login (MSAL) ===
+    const msalConfig = {
+      auth: {
+        clientId: CONFIG.clientId,
+        authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+        redirectUri: window.location.origin + window.location.pathname
+      },
+      cache: { cacheLocation: "localStorage" }
+    };
+    const msalInstance = new msal.PublicClientApplication(msalConfig);
+    const graphScope = ["User.Read", "Sites.ReadWrite.All"];
+
+    let account = null;          // eingeloggter Benutzer
+    let graphToken = null;       // Access Token
+    let siteId = null;           // SharePoint Site ID
+    let listId = null;           // List ID
+
+    // === UI State ===
+    let app = {
+      mode: 'QS',
+      selected: null,      // aktuell ausgewählte Tagesliste (Objekt aus SharePoint)
+      local: null          // lokales Arbeitsobjekt (Fields: title,date,status,items,...)
+    };
+
+    const $ = (id)=>document.getElementById(id);
+    const listsDiv = $('lists');
+    const emptyDiv = $('empty');
+    const detailDiv = $('detail');
+
+    $('modeQS').onclick = ()=>{ app.mode='QS'; renderDetail(); };
+    $('modeChef').onclick = ()=>{ app.mode='CHEFIN'; renderDetail(); };
+
+    $('loginBtn').onclick = async ()=>{
+      try {
+        await msalInstance.initialize();
+        const loginResp = await msalInstance.loginPopup({ scopes: graphScope });
+        account = loginResp.account; $('account').textContent = account.username; $('loginBtn').style.display='none'; $('logoutBtn').style.display='inline-block';
+        graphToken = await acquireToken();
+        await initSiteAndList();
+        await refreshList();
+      } catch(e){ alert('Login fehlgeschlagen: '+e.message); console.error(e); }
+    };
+    $('logoutBtn').onclick = async ()=>{ await msalInstance.logoutPopup(); };
+
+    async function acquireToken(){
+      const r1 = await msalInstance.acquireTokenSilent({ account, scopes: graphScope }).catch(()=>msalInstance.acquireTokenPopup({ scopes: graphScope }));
+      return r1.accessToken;
+    }
+
+    // === Graph Helpers ===
+    async function g(path, opts={}){
+      const res = await fetch('https://graph.microsoft.com/v1.0'+path, {
+        ...opts,
+        headers: { 'Authorization': 'Bearer '+graphToken, 'Content-Type': 'application/json', ...(opts.headers||{}) }
+      });
+      if(!res.ok){ const t = await res.text(); throw new Error(res.status+" "+t); }
+      return res.json();
+    }
+
+    async function initSiteAndList(){
+      // siteId ermitteln
+      const site = await g(`/sites/${CONFIG.sharepoint.siteHostname}:$${CONFIG.sharepoint.sitePath}`);
+      siteId = site.id;
+      // listId ermitteln
+      const lists = await g(`/sites/${siteId}/lists?$filter=displayName eq '${CONFIG.sharepoint.listName.replace(/'/g,"''")}'`);
+      if(!lists.value.length) throw new Error(`Liste '${CONFIG.sharepoint.listName}' nicht gefunden.`);
+      listId = lists.value[0].id;
+    }
+
+    async function refreshList(){
+      const res = await g(`/sites/${siteId}/lists/${listId}/items?$expand=fields($select=Title,Datum,Status,Payload,Modified)&$orderby=fields/Modified desc&$top=200`);
+      const items = res.value.map(x=>({ id:x.id, fields:x.fields }));
+      renderIndex(items);
+    }
+
+    function renderIndex(items){
+      const q = ($('search').value||'').toLowerCase();
+      const filtered = items.filter(i=> (i.fields.Title||'').toLowerCase().includes(q) || (i.fields.Datum||'').includes(q) );
+      listsDiv.innerHTML = '';
+      filtered.forEach(it=>{
+        const row = document.createElement('div'); row.className='row';
+        const btn = document.createElement('button'); btn.style.all='unset'; btn.style.cursor='pointer'; btn.style.flex='1';
+        btn.innerHTML = `<div><strong>${escapeHtml(it.fields.Title||'(ohne Titel)')}</strong></div><div class="muted">${it.fields.Datum||''} • ${it.fields.Status||'ENTWURF'}</div>`;
+        btn.onclick = ()=>openDay(it);
+        const pdf = button('PDF','sec'); pdf.onclick = async()=>{ await openDay(it); setTimeout(()=>window.print(),0); };
+        row.append(btn, pdf);
+        listsDiv.appendChild(row);
+      });
+    }
+
+    async function openDay(spItem){
+      app.selected = spItem; // Referenz auf SharePoint-Item
+      // Payload parsen
+      let payload = {};
+      try { payload = JSON.parse(spItem.fields.Payload||'{}'); } catch {}
+      // Standardstruktur herstellen
+      app.local = {
+        id: spItem.id,
+        title: spItem.fields.Title||payload.title||('Probensammlung '+(spItem.fields.Datum||'')),
+        date: spItem.fields.Datum||payload.date||new Date().toISOString().slice(0,10),
+        status: spItem.fields.Status||payload.status||'ENTWURF',
+        items: payload.items||[],
+      };
+      renderDetail();
+    }
+
+    function renderDetail(){
+      const sel = app.local; const locked = sel && sel.status==='FINAL';
+      $('empty').style.display = sel? 'none':'block';
+      $('detail').style.display = sel? 'block':'none';
+      if(!sel) return;
+      $('title').value = sel.title; $('title').disabled = locked;
+      $('date').value = sel.date; $('date').disabled = locked;
+      $('statusTag').textContent = sel.status; $('statusTag').className='tag status-'+sel.status;
+      $('toggleFinal').textContent = sel.status==='FINAL' ? 'Zurück auf Entwurf' : 'Finalisieren';
+      $('exportPdf').onclick = ()=>window.print();
+      $('title').oninput = ()=>{ sel.title = $('title').value; saveLocal(); };
+      $('date').oninput  = ()=>{ sel.date  = $('date').value; saveLocal(); };
+      $('toggleFinal').onclick = ()=>{ sel.status = sel.status==='FINAL'?'ENTWURF':'FINAL'; saveLocal(true); };
+
+      $('addItem').disabled = locked || app.mode!=='CHEFIN';
+      $('addItem').onclick = ()=>{ sel.items.push({produkt:'',marke:'',artikelnummer:'',menge:'',anweisungen:'',losnummer:'',mhd:'',notizen:'',ok:false}); renderItems(); saveLocal(); };
+
+      renderItems();
+    }
+
+    function renderItems(){
+      const tbody = $('items'); tbody.innerHTML = '';
+      const sel = app.local; const locked = sel.status==='FINAL';
+
+      if(sel.items.length===0){ const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=10; td.className='muted'; td.textContent='Noch keine Positionen – „+ Position“'; tr.appendChild(td); tbody.appendChild(tr); return; }
+
+      sel.items.forEach((it, idx)=>{
+        const tr=document.createElement('tr');
+        tr.appendChild(td(String(idx+1)));
+
+        // produkt (Chefin per Text/Dropdown; hier Text für Kürze)
+        tr.appendChild(cellEdit(it,'produkt', app.mode==='CHEFIN' && !locked));
+        tr.appendChild(cellEdit(it,'marke', app.mode==='CHEFIN' && !locked));
+        tr.appendChild(cellEdit(it,'artikelnummer', app.mode==='CHEFIN' && !locked));
+        tr.appendChild(cellEdit(it,'menge', app.mode==='CHEFIN' && !locked));
+        tr.appendChild(cellEdit(it,'anweisungen', app.mode==='CHEFIN' && !locked));
+
+        tr.appendChild(cellEdit(it,'losnummer', app.mode==='QS' && !locked));
+        tr.appendChild(cellEdit(it,'mhd', app.mode==='QS' && !locked, 'YYYY-MM-DD'));
+        tr.appendChild(cellEdit(it,'notizen', (app.mode!=='FINAL' && !locked)));
+
+        // OK
+        const tdOk = document.createElement('td');
+        const ck = document.createElement('input'); ck.type='checkbox'; ck.checked=!!it.ok; ck.disabled=locked; ck.oninput=()=>{ it.ok=ck.checked; saveLocal(); };
+        tdOk.appendChild(ck); tr.appendChild(tdOk);
+
+        tbody.appendChild(tr);
+      });
+
+      function td(html){ const c=document.createElement('td'); c.innerHTML=html; return c; }
+      function cellEdit(obj,key,editable,placeholder=''){
+        const c=document.createElement('td');
+        if(editable){ const i=document.createElement('input'); i.className='inp'; i.value=obj[key]||''; if(placeholder) i.placeholder=placeholder; i.oninput=()=>{ obj[key]=i.value; saveLocal(); }; c.appendChild(i); }
+        else { c.textContent=obj[key]||'–'; }
+        return c;
+      }
+    }
+
+    // Speichern nach SharePoint (einfach): kompletter JSON-Payload in Feld "Payload"
+    async function saveLocal(pushStatusChange=false){
+      if(!app.selected) return;
+      // UI → SharePoint Fields
+      const fields = {
+        Title: app.local.title,
+        Datum: app.local.date,
+        Status: app.local.status,
+        Payload: JSON.stringify({ title: app.local.title, date: app.local.date, status: app.local.status, items: app.local.items })
+      };
+      try {
+        if(!graphToken) graphToken = await acquireToken();
+        await g(`/sites/${siteId}/lists/${listId}/items/${app.selected.id}/fields`, { method:'PATCH', body: JSON.stringify(fields) });
+        if(pushStatusChange){
+          console.log('Status geändert → Power Automate kann hierauf triggern');
+        }
+      } catch(e){ alert('Speichern fehlgeschlagen: '+e.message); console.error(e); }
+    }
+
+    // Neue Tagesliste anlegen
+    $('newListBtn').onclick = async ()=>{
+      if(!graphToken) graphToken = await acquireToken();
+      const title = 'Probensammlung '+new Date().toISOString().slice(0,10);
+      const fields = { Title:title, Datum:new Date().toISOString().slice(0,10), Status:'ENTWURF', Payload: JSON.stringify({ title, date: new Date().toISOString().slice(0,10), status:'ENTWURF', items: [] }) };
+      const res = await g(`/sites/${siteId}/lists/${listId}/items`, { method:'POST', body: JSON.stringify({ fields }) });
+      await refreshList();
+      await openDay({ id: res.id, fields: fields });
+    };
+
+    // Helpers
+    function escapeHtml(str){ return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s])); }
+  </script>
+</body>
+</html>
