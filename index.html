@@ -100,15 +100,16 @@
 
   <script>
     // === 🔧 KONFIGURATION – HIER EINTRAGEN ===
-    const CONFIG = {
-      tenantId: "<TENANT_ID>",            // z.B. 11111111-2222-3333-4444-555555555555
-      clientId: "<APP_CLIENT_ID>",        // App-Registrierung (SPA)
-      sharepoint: {
-        siteHostname: "<tenant>.sharepoint.com",   // z.B. petri.sharepoint.com
-        sitePath: "/sites/<SiteName>",             // z.B. /sites/QM
-        listName: "QM Tageslisten"                  // Liste muss existieren
-      }
-    };
+   const CONFIG = {
+  tenantId: "5f45f3bb-d0ff-4b7b-bcf4-4aeeb92442a8",   // Verzeichnis-ID (Mandant)
+  clientId: "72049b41-29d5-43d4-8089-c817587969ff",  // Anwendungs-ID (Client)
+  sharepoint: {
+    siteHostname: "petri.sharepoint.com",  // oder wie eure Tenant-URL lautet
+    sitePath: "/sites/QM",                 // der Pfad zu eurer QM-Site
+    listName: "QM Tageslisten"             // exakter Listenname
+  }
+};
+
 
     // === 💡 DATENMODELL (einfach):
     // In der SharePoint-Liste "QM Tageslisten" speichern wir je Tagesliste EINEN Eintrag.
