@@ -177,7 +177,10 @@
 
     async function initSiteAndList(){
       // siteId ermitteln
-      const site = await g(`/sites/${CONFIG.sharepoint.siteHostname}:$${CONFIG.sharepoint.sitePath}`);
+     // richtig:
+const site = await g(`/sites/${CONFIG.sharepoint.siteHostname}:${CONFIG.sharepoint.sitePath}`);
+// Beispiel-Auflösung: /sites/petri.sharepoint.com:/sites/QM
+
       siteId = site.id;
       // listId ermitteln
       const lists = await g(`/sites/${siteId}/lists?$filter=displayName eq '${CONFIG.sharepoint.listName.replace(/'/g,"''")}'`);
