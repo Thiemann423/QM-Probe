@@ -107,7 +107,8 @@
    sharepoint: {
     siteHostname: "petrifeinkost.sharepoint.com",
     sitePath: "/sites/QM",
-    listName: "QM Tageslisten"
+    listName: "QM Tageslisten",
+      catalogListName: "Produktkatalog"  
   }
 };
 
@@ -241,6 +242,17 @@ $('logoutBtn').onclick = async () => {
     console.error('AutoInit', e);
   }
 })();
+
+    let catalog = [];
+
+async function loadCatalog() {
+  const r = await g(`/sites/${siteId}/lists?$filter=displayName eq '${CONFIG.sharepoint.catalogListName.replace(/'/g,"''")}'`);
+  if (!r.value.length) return; 
+  const catalogId = r.value[0].id;
+  const rows = await g(`/sites/${siteId}/lists/${catalogId}/items?$expand=fields($select=Title,Marke,Artikelnummer,StandardMenge)&$top=2000`);
+  catalog = rows.value.map(x => x.fields);
+  console.log("[QM] Produktkatalog geladen:", catalog.length, "Einträge");
+}
 
 
     async function acquireToken(){
