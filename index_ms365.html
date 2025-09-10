@@ -30,7 +30,8 @@
     .status-ENTWURF{border-color:var(--warn);color:var(--warn)}
   </style>
   <!-- MSAL.js (Microsoft Login) -->
-  <script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js" integrity="sha384-3nqzWb3mGzltu1b9uYY0Q+qGjkZfz6l1h8oivEw1o5zDknE9mup6T2v0vNMyU4kW" crossorigin="anonymous"></script>
+  <script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
+
 </head>
 <body>
   <div class="wrap">
@@ -117,16 +118,25 @@
     // "Payload" enthält die komplette Liste inkl. Positionen als JSON (leicht, robust, versionierbar).
 
     // === 🔐 Login (MSAL) ===
-    const msalConfig = {
-      auth: {
-        clientId: CONFIG.clientId,
-        authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
-        redirectUri: window.location.origin + window.location.pathname
-      },
-      cache: { cacheLocation: "localStorage" }
-    };
-    const msalInstance = new msal.PublicClientApplication(msalConfig);
-    const graphScope = ["User.Read", "Sites.ReadWrite.All"];
+const msalConfig = {
+  auth: {
+    clientId: CONFIG.clientId,
+    authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+    redirectUri: window.location.origin + window.location.pathname
+  },
+  cache: { cacheLocation: "localStorage" }
+};
+
+// --- MSAL global initialisieren ---
+if (!window.msal) {
+  alert('MSAL konnte nicht geladen werden. Bitte Seite neu laden (Strg+F5).');
+  throw new Error('MSAL not loaded');
+}
+
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const graphScope   = ["User.Read", "Sites.ReadWrite.All"];
+
+
 
     let account = null;          // eingeloggter Benutzer
     let graphToken = null;       // Access Token
@@ -154,47 +164,39 @@ $('search').addEventListener('input', () => refreshList().catch(console.error));
 $('loginBtn').onclick = async () => {
   try {
     console.log('[QM] Login clicked');
-    if (!window.msal) {
-      alert('MSAL wurde nicht geladen.');
-      return;
-    }
 
     await msalInstance.initialize();
     console.log('[QM] MSAL init ok');
 
-    // Popup-Login (bequem) …
     const loginResp = await msalInstance.loginPopup({ scopes: graphScope });
 
-    // … wenn erfolgreich:
     account = loginResp.account;
     msalInstance.setActiveAccount(account);
-    $('account').textContent = account.username;
+    $('account').textContent   = account.username;
     $('loginBtn').style.display = 'none';
     $('logoutBtn').style.display = 'inline-block';
 
     graphToken = await acquireToken();
     await initSiteAndList();
     await refreshList();
+
   } catch (e) {
     console.error('[QM] Login popup error', e);
 
-    // Häufigster Fall: Popup blockiert -> Redirect als Fallback
     const code = (e.errorCode || e.code || '').toString().toLowerCase();
-    const msg  = (e.message || '').toLowerCase();
-
-    const popupBlocked =
-      code.includes('popup') || msg.includes('popup') || msg.includes('block');
+    const msg  = (e.message   || '').toLowerCase();
+    const popupBlocked = code.includes('popup') || msg.includes('popup') || msg.includes('block');
 
     if (popupBlocked) {
-      // Nutzer-Hinweis und Wechsel auf Redirect-Flow (kein Popup nötig)
       alert('Popup wurde blockiert – wir melden dich jetzt per Redirect an.');
       msalInstance.loginRedirect({ scopes: graphScope });
-      return; // Seite navigiert gleich weg
+      return;
     }
 
     alert('Login fehlgeschlagen: ' + (e.errorCode || '') + ' ' + (e.message || ''));
   }
 };
+
 
 
  // Robuster Logout: räumt auf und setzt die UI sicher zurück
