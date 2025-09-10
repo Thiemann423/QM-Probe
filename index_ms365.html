@@ -140,40 +140,79 @@
       local: null          // lokales Arbeitsobjekt (Fields: title,date,status,items,...)
     };
 
-    const $ = (id)=>document.getElementById(id);
-    const listsDiv = $('lists');
-    const emptyDiv = $('empty');
-    const detailDiv = $('detail');
+ const $ = (id) => document.getElementById(id);
+const listsDiv = $('lists');
+const emptyDiv = $('empty');
+const detailDiv = $('detail');
 
-    $('modeQS').onclick = ()=>{ app.mode='QS'; renderDetail(); };
-    $('modeChef').onclick = ()=>{ app.mode='CHEFIN'; renderDetail(); };
+$('modeQS').onclick  = () => { app.mode = 'QS';    renderDetail(); };
+$('modeChef').onclick = () => { app.mode = 'CHEFIN'; renderDetail(); };
 
-    $('loginBtn').onclick = async ()=>{
-      try {
-        await msalInstance.initialize();
-        const loginResp = await msalInstance.loginPopup({ scopes: graphScope });
-        account = loginResp.account; $('account').textContent = account.username; $('loginBtn').style.display='none'; $('logoutBtn').style.display='inline-block';
-        graphToken = await acquireToken();
-        await initSiteAndList();
-        await refreshList();
-      } catch(e){ alert('Login fehlgeschlagen: '+e.message); console.error(e); }
-    };
+// Suche live filtern (optional, aber praktisch)
+$('search').addEventListener('input', () => refreshList().catch(console.error));
+
+$('loginBtn').onclick = async () => {
+  try {
+    await msalInstance.initialize();
+    const loginResp = await msalInstance.loginPopup({ scopes: graphScope });
+
+    // 🔴 NEU: aktiven Account setzen
+    account = loginResp.account;
+    msalInstance.setActiveAccount(account);
+
+    $('account').textContent = account.username;
+    $('loginBtn').style.display = 'none';
+    $('logoutBtn').style.display = 'inline-block';
+
+    graphToken = await acquireToken();
+    await initSiteAndList();
+    await refreshList();
+  } catch (e) {
+    alert('Login fehlgeschlagen: ' + e.message);
+    console.error(e);
+  }
+};
+
     $('logoutBtn').onclick = async ()=>{ await msalInstance.logoutPopup(); };
+(async function autoInit(){
+  try {
+    await msalInstance.initialize();
+    const accs = msalInstance.getAllAccounts();
+    if (accs.length) {
+      account = accs[0];
+      msalInstance.setActiveAccount(account);
+      $('account').textContent = account.username;
+      graphToken = await acquireToken().catch(()=>null);
+      if (graphToken) { await initSiteAndList(); await refreshList();
+        $('loginBtn').style.display='none'; $('logoutBtn').style.display='inline-block';
+      }
+    }
+  } catch(e){ console.error('AutoInit', e); }
+})();
 
     async function acquireToken(){
       const r1 = await msalInstance.acquireTokenSilent({ account, scopes: graphScope }).catch(()=>msalInstance.acquireTokenPopup({ scopes: graphScope }));
       return r1.accessToken;
     }
 
-    // === Graph Helpers ===
-    async function g(path, opts={}){
-      const res = await fetch('https://graph.microsoft.com/v1.0'+path, {
-        ...opts,
-        headers: { 'Authorization': 'Bearer '+graphToken, 'Content-Type': 'application/json', ...(opts.headers||{}) }
-      });
-      if(!res.ok){ const t = await res.text(); throw new Error(res.status+" "+t); }
-      return res.json();
+  async function g(path, opts = {}) {
+  const res = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    ...opts,
+    headers: {
+      'Authorization': 'Bearer ' + graphToken,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {})
     }
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(res.status + ' ' + t);
+  }
+  // Falls keine Daten zurückkommen (z. B. PATCH → 204)
+  if (res.status === 204) return {};
+  return res.json();
+}
+
 
     async function initSiteAndList(){
       // siteId ermitteln
@@ -195,19 +234,50 @@ const site = await g(`/sites/${CONFIG.sharepoint.siteHostname}:${CONFIG.sharepoi
     }
 
     function renderIndex(items){
-      const q = ($('search').value||'').toLowerCase();
-      const filtered = items.filter(i=> (i.fields.Title||'').toLowerCase().includes(q) || (i.fields.Datum||'').includes(q) );
-      listsDiv.innerHTML = '';
-      filtered.forEach(it=>{
-        const row = document.createElement('div'); row.className='row';
-        const btn = document.createElement('button'); btn.style.all='unset'; btn.style.cursor='pointer'; btn.style.flex='1';
-        btn.innerHTML = `<div><strong>${escapeHtml(it.fields.Title||'(ohne Titel)')}</strong></div><div class="muted">${it.fields.Datum||''} • ${it.fields.Status||'ENTWURF'}</div>`;
-        btn.onclick = ()=>openDay(it);
-        const pdf = button('PDF','sec'); pdf.onclick = async()=>{ await openDay(it); setTimeout(()=>window.print(),0); };
-        row.append(btn, pdf);
-        listsDiv.appendChild(row);
-      });
-    }
+  const q = ( ($('search').value || '').toLowerCase() ).trim();
+
+  const filtered = items.filter(i => {
+    const title  = String(i.fields.Title  || '').toLowerCase();
+    const datum  = String(i.fields.Datum  || '').toLowerCase();   // robust gegen null/Date
+    const status = String(i.fields.Status || '').toLowerCase();
+    return !q || title.includes(q) || datum.includes(q) || status.includes(q);
+  });
+
+  listsDiv.innerHTML = '';
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'muted';
+    empty.style.padding = '8px';
+    empty.textContent = q ? 'Keine Treffer für die Suche.' : 'Noch keine Tageslisten.';
+    listsDiv.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(it => {
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const btn = document.createElement('button');
+    btn.style.all = 'unset';
+    btn.style.cursor = 'pointer';
+    btn.style.flex = '1';
+
+    const title = escapeHtml(it.fields.Title || '(ohne Titel)');
+    const date  = escapeHtml(String(it.fields.Datum || ''));
+    const stat  = escapeHtml(String(it.fields.Status || 'ENTWURF'));
+
+    btn.innerHTML = `<div><strong>${title}</strong></div><div class="muted">${date} • ${stat}</div>`;
+    btn.onclick = () => openDay(it);
+
+    const pdf = button('PDF', 'sec');
+    pdf.onclick = async () => { await openDay(it); setTimeout(() => window.print(), 0); };
+
+    row.append(btn, pdf);
+    listsDiv.appendChild(row);
+  });
+}
+
 
     async function openDay(spItem){
       app.selected = spItem; // Referenz auf SharePoint-Item
@@ -282,6 +352,12 @@ const site = await g(`/sites/${CONFIG.sharepoint.siteHostname}:${CONFIG.sharepoi
         return c;
       }
     }
+function button(text, cls){
+  const b = document.createElement('button');
+  b.className = 'btn ' + (cls || '');
+  b.textContent = text;
+  return b;
+}
 
     // Speichern nach SharePoint (einfach): kompletter JSON-Payload in Feld "Payload"
     async function saveLocal(pushStatusChange=false){
