@@ -173,22 +173,49 @@ $('loginBtn').onclick = async () => {
   }
 };
 
-    $('logoutBtn').onclick = async ()=>{ await msalInstance.logoutPopup(); };
+ // Robuster Logout: räumt auf und setzt die UI sicher zurück
+$('logoutBtn').onclick = async () => {
+  try {
+    await msalInstance.logoutPopup();
+  } finally {
+    location.reload(); // UI & MSAL-Cache sauber zurücksetzen
+  }
+};
+
+// Beim Laden: vorhandene Sitzung wiederherstellen
 (async function autoInit(){
   try {
     await msalInstance.initialize();
     const accs = msalInstance.getAllAccounts();
-    if (accs.length) {
+
+    if (accs.length > 0) {
       account = accs[0];
       msalInstance.setActiveAccount(account);
       $('account').textContent = account.username;
-      graphToken = await acquireToken().catch(()=>null);
-      if (graphToken) { await initSiteAndList(); await refreshList();
-        $('loginBtn').style.display='none'; $('logoutBtn').style.display='inline-block';
+
+      // Token still versuchen; nur bei Bedarf später interaktiv
+      graphToken = await acquireToken().catch(() => null);
+
+      if (graphToken) {
+        await initSiteAndList();
+        await refreshList();
+        $('loginBtn').style.display = 'none';
+        $('logoutBtn').style.display = 'inline-block';
+      } else {
+        // Kein Token verfügbar – UI bleibt im „nicht eingeloggt“-Zustand
+        $('loginBtn').style.display = 'inline-block';
+        $('logoutBtn').style.display = 'none';
       }
+    } else {
+      // Kein Account im Cache – UI auf Login vorbereiten
+      $('loginBtn').style.display = 'inline-block';
+      $('logoutBtn').style.display = 'none';
     }
-  } catch(e){ console.error('AutoInit', e); }
+  } catch (e) {
+    console.error('AutoInit', e);
+  }
 })();
+
 
     async function acquireToken(){
       const r1 = await msalInstance.acquireTokenSilent({ account, scopes: graphScope }).catch(()=>msalInstance.acquireTokenPopup({ scopes: graphScope }));
