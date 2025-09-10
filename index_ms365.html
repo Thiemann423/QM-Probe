@@ -153,13 +153,21 @@ $('search').addEventListener('input', () => refreshList().catch(console.error));
 
 $('loginBtn').onclick = async () => {
   try {
+    console.log('[QM] Login clicked');
+    if (!window.msal) {
+      alert('MSAL wurde nicht geladen.');
+      return;
+    }
+
     await msalInstance.initialize();
+    console.log('[QM] MSAL init ok');
+
+    // Popup-Login (bequem) …
     const loginResp = await msalInstance.loginPopup({ scopes: graphScope });
 
-    // 🔴 NEU: aktiven Account setzen
+    // … wenn erfolgreich:
     account = loginResp.account;
     msalInstance.setActiveAccount(account);
-
     $('account').textContent = account.username;
     $('loginBtn').style.display = 'none';
     $('logoutBtn').style.display = 'inline-block';
@@ -168,10 +176,26 @@ $('loginBtn').onclick = async () => {
     await initSiteAndList();
     await refreshList();
   } catch (e) {
-    alert('Login fehlgeschlagen: ' + e.message);
-    console.error(e);
+    console.error('[QM] Login popup error', e);
+
+    // Häufigster Fall: Popup blockiert -> Redirect als Fallback
+    const code = (e.errorCode || e.code || '').toString().toLowerCase();
+    const msg  = (e.message || '').toLowerCase();
+
+    const popupBlocked =
+      code.includes('popup') || msg.includes('popup') || msg.includes('block');
+
+    if (popupBlocked) {
+      // Nutzer-Hinweis und Wechsel auf Redirect-Flow (kein Popup nötig)
+      alert('Popup wurde blockiert – wir melden dich jetzt per Redirect an.');
+      msalInstance.loginRedirect({ scopes: graphScope });
+      return; // Seite navigiert gleich weg
+    }
+
+    alert('Login fehlgeschlagen: ' + (e.errorCode || '') + ' ' + (e.message || ''));
   }
 };
+
 
  // Robuster Logout: räumt auf und setzt die UI sicher zurück
 $('logoutBtn').onclick = async () => {
